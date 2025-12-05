@@ -1,0 +1,5 @@
+streamlit
+google-generativeai
+scikit-learn
+spacy
+pypdf2
