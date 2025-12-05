@@ -1,10 +1,8 @@
 import streamlit as st
 import google.generativeai as genai
-import fitz  # This is PyMuPDF
+import fitz  # PyMuPDF
 import spacy
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-import re
 import json
 
 # --- CONFIGURATION ---
@@ -39,38 +37,57 @@ def create_highlighted_pdf(uploaded_file, phrases_to_highlight):
     3. Draws a red box around them.
     4. Returns an image of the first page with highlights.
     """
-    # Reset file pointer to beginning
     uploaded_file.seek(0)
     doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
     first_page = doc[0]  # We only highlight the first page for now
 
     for phrase in phrases_to_highlight:
-        # Search for the text on the page
         text_instances = first_page.search_for(phrase)
-        
-        # Draw a red rectangle (stroke) around every instance found
         for inst in text_instances:
             first_page.draw_rect(inst, color=(1, 0, 0), width=2) # Red box
 
-    # Convert page to image (Pixmap) so Streamlit can show it
     pix = first_page.get_pixmap()
     return pix.tobytes()
 
+def get_embedding(text):
+    """
+    Generates a vector embedding for the text using Gemini.
+    This captures the SEMANTIC meaning, not just keywords.
+    """
+    # Clean newlines to avoid embedding issues
+    clean_text = text.replace("\n", " ")
+    try:
+        # We use the specialized embedding model
+        result = genai.embed_content(
+            model="models/text-embedding-004",
+            content=clean_text[:8000],  # Limit to ~2000 tokens to stay within limits
+            task_type="retrieval_document",
+            title="Resume Text"
+        )
+        return result['embedding']
+    except Exception as e:
+        # Fallback if embedding fails
+        st.error(f"Embedding Error: {e}")
+        return []
+
 def calculate_similarity(resume_text, jd_text):
-    # Simple cleaning
-    text1 = re.sub(r'[^a-z\s]', '', resume_text.lower())
-    text2 = re.sub(r'[^a-z\s]', '', jd_text.lower())
+    """
+    Calculates score using Semantic Embeddings (Smart Match).
+    """
+    # 1. Get Embeddings
+    resume_emb = get_embedding(resume_text)
+    jd_emb = get_embedding(jd_text)
     
-    documents = [text1, text2]
-    vectorizer = TfidfVectorizer(stop_words='english')
-    sparse_matrix = vectorizer.fit_transform(documents)
-    score = cosine_similarity(sparse_matrix, sparse_matrix)[0][1]
-    return round(score * 100, 2)
+    # 2. Calculate Cosine Similarity
+    if resume_emb and jd_emb:
+        # Scikit-learn expects 2D arrays [[...]]
+        score = cosine_similarity([resume_emb], [jd_emb])[0][0]
+        return round(score * 100, 2)
+    return 0.0
 
 def get_gemini_analysis(resume_text, jd_text):
     model = genai.GenerativeModel('gemini-2.5-flash')
     
-    # We ask Gemini to return JSON so we can programmatically use the text
     prompt = f"""
     Act as an ATS Expert. 
     RESUME: {resume_text[:3000]}
@@ -115,15 +132,22 @@ with col2:
 if st.button("Analyze & Highlight", type="primary"):
     if uploaded_file and jd_input:
         
-        with st.spinner("Reading PDF and calculating score..."):
+        with st.spinner("Analyzing semantics (this uses AI, not just keywords)..."):
             # 1. Extract Text
             resume_text = extract_text_from_pdf(uploaded_file)
             
-            # 2. Score
+            # 2. Score with Embeddings
             score = calculate_similarity(resume_text, jd_input)
             
         st.header(f"Match Score: {score}%")
         st.progress(score/100)
+        
+        if score > 70:
+            st.success("High semantic match!")
+        elif score > 40:
+            st.warning("Moderate match.")
+        else:
+            st.error("Low match.")
 
         with st.spinner("AI is identifying weak spots and drawing boxes..."):
             # 3. Get Weak Phrases from Gemini
