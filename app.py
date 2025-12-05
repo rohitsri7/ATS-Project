@@ -47,7 +47,7 @@ def calculate_similarity(resume_text, jd_text):
 
 def get_gemini_analysis(resume_text, jd_text):
     """Sends text to Gemini AI for intelligent suggestions."""
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    model = genai.GenerativeModel('gemini-2.5-flash')
     
     prompt = f"""
     Act as a highly experienced Technical Recruiter and ATS Specialist.
@@ -119,3 +119,4 @@ if st.button("Analyze My Resume", type="primary"):
             
     else:
         st.warning("Please upload a resume AND paste a job description first.")
+
